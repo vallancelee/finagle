@@ -57,6 +57,39 @@ resetDebugLevel()
 dprint2("Wireshark version = ".. get_version())
 dprint2("Lua version = ".. _VERSION)
 
+
+-- bit32 compatibility shim for different Lua runtimes (Lua 5.2, LuaJIT, Lua 5.3+)
+local bit32 = bit32 -- use existing if present
+
+if not bit32 then
+  -- Lua 5.3+ supports native bitwise operators
+  local vers = tonumber((_VERSION:match("Lua (%d+%.%d+)")) or 0)
+  if vers >= 5.3 then
+    bit32 = {
+      lshift = function(x,n) return (x << n) & 0xFFFFFFFF end,
+      rshift = function(x,n) return (x >> n) & 0xFFFFFFFF end,
+      band   = function(a,b) return (a & b) end,
+      bnot   = function(x) return (~x) & 0xFFFFFFFF end,
+    }
+  else
+    -- Try to require common bit libraries (Lua 5.2/ LuaJIT)
+    local ok, b = pcall(require, "bit32")
+    if not ok then ok, b = pcall(require, "bit") end
+
+    if ok and b then
+      -- adapt bit / bit32 APIs to a common bit32-like table
+      bit32 = {
+        lshift = b.lshift or b.bit_lshift,
+        rshift = b.rshift or b.bit_rshift,
+        band   = b.band   or b.bit_and,
+        bnot   = b.bnot   or function(x) return b.bxor(x, 0xFFFFFFFF) end,
+      }
+    else
+      error("No bit library available: need bit32 / bit or Lua 5.3+")
+    end
+  end
+end
+
 ----------------------------------------
 -- the lua api for tcp segment reassembly was introduced in 1.99.2
 local major, minor, micro = get_version():match("(%d+)%.(%d+)%.(%d+)")
