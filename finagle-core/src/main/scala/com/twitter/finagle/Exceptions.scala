@@ -203,7 +203,10 @@ class CancelledRequestException(cause: Throwable) extends RequestException(cause
  * failed because too many requests are already waiting for a connection to
  * become available from a client's connection pool.
  */
-class TooManyWaitersException extends RequestException with HasLogLevel {
+class TooManyWaitersException(message: String)
+    extends RequestException(message, null)
+    with HasLogLevel {
+  def this() = this(null)
   def logLevel: Level = Level.DEBUG
 }
 
