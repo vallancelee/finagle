@@ -3,7 +3,6 @@ package com.twitter.finagle.liveness
 import com.twitter.conversions.DurationOps._
 import com.twitter.finagle.service._
 import com.twitter.finagle.stats.InMemoryStatsReceiver
-import com.twitter.finagle.stats.NullStatsReceiver
 import com.twitter.finagle.util.Rng
 import com.twitter.finagle.Backoff
 import com.twitter.finagle.Backoff.ExponentialJittered
@@ -34,19 +33,24 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
 
     def copyWithFlags(newFlags: Long): ExceptionWithFailureFlags =
       new ExceptionWithFailureFlags(newFlags)
+
+    override def toString = FailureFlags.flagsOf(flags).mkString(",")
   }
 
   val ignorableFailures = Seq(
     Failure.ignorable("ignore me!"),
-    new ExceptionWithFailureFlags(FailureFlags.Ignorable)
+    new ExceptionWithFailureFlags(FailureFlags.Ignorable),
+    new ExceptionWithFailureFlags(FailureFlags.ClientDiscarded)
   )
+
+  private class BoomException extends Exception
 
   class Helper(failureAccrualPolicy: FailureAccrualPolicy) {
     val statsReceiver = new InMemoryStatsReceiver
     val underlyingService = mock[Service[Int, Int]]
     when(underlyingService.close(any[Time])) thenReturn Future.Done
     when(underlyingService.status) thenReturn Status.Open
-    when(underlyingService(ArgumentMatchers.anyInt)) thenReturn Future.exception(new Exception)
+    when(underlyingService(ArgumentMatchers.anyInt)) thenReturn Future.exception(new BoomException)
 
     val underlying = mock[ServiceFactory[Int, Int]]
     when(underlying.close(any[Time])) thenReturn Future.Done
@@ -89,6 +93,12 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
       // Now failed
 
       assert(statsReceiver.counters(List("removals")) == 1)
+      assert(
+        statsReceiver.counters(
+          List(
+            "failures",
+            "service_application",
+            "com.twitter.finagle.liveness.FailureAccrualFactoryTest$BoomException")) == 3)
       assert(!factory.isAvailable)
       assert(!service.isAvailable)
 
@@ -118,15 +128,17 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
     // normally these are failures, but these will not trip it...
     svc(Failure("success"))
     svc(Failure("also success"))
-    assert(stats.counter("removals")() == 0)
+    assert(stats.counters(Seq("removals")) == 0)
 
     // now some ignorable exceptions
     svc(Failure("ignore"))
-    assert(stats.counter("removals")() == 0)
+    assert(stats.counters(Seq("removals")) == 0)
 
     // trip it.
     svc(Failure("boom"))
-    assert(stats.counter("removals")() == 1)
+    assert(stats.counters(Seq("removals")) == 1)
+    assert(
+      stats.counters(Seq("failures", "service_application", "com.twitter.finagle.Failure")) == 1)
   }
 
   ignorableFailures.foreach { ignorableFailure =>
@@ -145,7 +157,7 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
 
       val svc = Await.result(faf(), 5.seconds)
       svc(())
-      assert(stats.counter("removals")() == 0)
+      assert(stats.counters(Seq("removals")) == 0)
       assert(faf.isAvailable)
     }
 
@@ -167,20 +179,20 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
       svc(())
       svc(())
 
-      assert(stats.counter("removals")() == 0)
+      assert(stats.counters(Seq("removals")) == 0)
       assert(faf.isAvailable)
 
       ret = Future.exception[Unit](ignorableFailure)
 
       svc(()) // this should not be counted as a success
-      assert(stats.counter("removals")() == 0)
+      assert(stats.counters(Seq("removals")) == 0)
       assert(faf.isAvailable)
 
       ret = Future.exception[Unit](new Exception("boom!"))
 
       svc(()) // Third "real" exception in a row; should trip FA
 
-      assert(stats.counter("removals")() == 1)
+      assert(stats.counters(Seq("removals")) == 1)
       assert(!faf.isAvailable)
     }
 
@@ -204,7 +216,7 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
         svc(())
 
         // Trip FA
-        assert(stats.counter("removals")() == 1)
+        assert(stats.counters(Seq("removals")) == 1)
         assert(!faf.isAvailable)
 
         timeControl.advance(10.seconds)
@@ -219,8 +231,8 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
         // ensure that the ignorable not counted as a success, but that we can still send requests
         // (ProbeOpen state)
         assert(stats.counters(List("revivals")) == 0)
-        assert(stats.counter("probes")() == 1)
-        assert(stats.counter("removals")() == 1)
+        assert(stats.counters(Seq("probes")) == 1)
+        assert(stats.counters(Seq("removals")) == 1)
         assert(faf.isAvailable)
       }
     }
@@ -763,6 +775,8 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
         }
       }
       assert(!factory.isAvailable)
+      assert(
+        statsReceiver.counters(Seq("failures", "service_acquisition", "java.lang.Exception")) == 3)
 
       // Advance past period
       timeControl.advance(10.seconds)
@@ -780,6 +794,7 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
   }
 
   class CustomizedFactory {
+    val statsReceiver = new InMemoryStatsReceiver
     class CustomizedFailureAccrualFactory(
       underlying: ServiceFactory[Int, Int],
       failureAccrualPolicy: FailureAccrualPolicy,
@@ -790,7 +805,7 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
           failureAccrualPolicy,
           responseClassifier,
           timer,
-          NullStatsReceiver
+          statsReceiver
         ) {
       override def classify(reqRep: ReqRep): ResponseClass = {
         reqRep.response match {
@@ -833,6 +848,9 @@ class FailureAccrualFactoryTest extends AnyFunSuite with MockitoSugar {
 
       // Now fail:
       assert(Await.result(service(123), 5.seconds) == 321)
+      assert(
+        statsReceiver.counters(
+          Seq("failures", "service_application", "encoded_application_error")) == 3)
       assert(!service.isAvailable)
 
       verify(underlyingService, times(3))(123)

@@ -263,7 +263,7 @@ private[mux] abstract class ClientServerTest
     val e = intercept[ClientDiscardedRequestException] {
       throw p.isInterrupted.get
     }
-    assert(e.flags == FailureFlags.Interrupted)
+    assert(e.flags == (FailureFlags.Interrupted | FailureFlags.ClientDiscarded))
     assert(e.getMessage == "java.lang.Exception: sad panda")
     assert(f.poll == Some(Throw(exc)))
   }
@@ -285,7 +285,8 @@ private[mux] abstract class ClientServerTest
     val e = intercept[ClientDiscardedRequestException] {
       throw p.isInterrupted.get
     }
-    assert(e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable))
+    assert(
+      e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable | FailureFlags.ClientDiscarded))
     assert(f.poll == Some(Throw(exc)))
   }
 

@@ -1,6 +1,8 @@
 package com.twitter.finagle
 
-import com.twitter.util.{Future, Throw, Try}
+import com.twitter.util.Future
+import com.twitter.util.Throw
+import com.twitter.util.Try
 
 /**
  * `FailureFlags` may be applied to any Failure/Exception encountered during the
@@ -60,6 +62,13 @@ object FailureFlags {
   private[twitter] val DeadlineExceeded: Long = 1L << 6
 
   /**
+   * ClientDiscarded indicates that the upstream/ingress client has discarded the request. This
+   * may be due to a timeout. If latency is unchanged on the server side, an increase in these
+   * failure types may indicate a problem upstream/ingress and not within this service.
+   */
+  private[twitter] val ClientDiscarded: Long = 1L << 7
+
+  /**
    * Naming indicates a naming failure. This is Finagle-internal.
    */
   private[finagle] val Naming: Long = 1L << 32
@@ -73,7 +82,7 @@ object FailureFlags {
    * effect before issuing the client call.
    */
   private[finagle] val ShowMask: Long =
-    Interrupted | Rejected | NonRetryable | DeadlineExceeded | Ignorable
+    Interrupted | Rejected | NonRetryable | DeadlineExceeded | Ignorable | ClientDiscarded
 
   /**
    * Expose flags as strings. Used for stats reporting. Here, Retryable is named
@@ -89,6 +98,7 @@ object FailureFlags {
     if ((flags & NonRetryable) > 0) names += "nonretryable"
     if ((flags & Ignorable) > 0) names += "ignorable"
     if ((flags & DeadlineExceeded) > 0) names += "deadline_exceeded"
+    if ((flags & ClientDiscarded) > 0) names += "client_discarded"
     names
   }
 

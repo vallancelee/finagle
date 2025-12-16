@@ -3,17 +3,21 @@ package com.twitter.finagle.http2.transport.common
 import com.twitter.finagle.FailureFlags
 import com.twitter.finagle.http.filter.HttpNackFilter
 import com.twitter.finagle.http2.RstException
-import com.twitter.logging.{HasLogLevel, Level, Logger}
+import com.twitter.logging.HasLogLevel
+import com.twitter.logging.Level
+import com.twitter.logging.Logger
 import io.netty.buffer.Unpooled
-import io.netty.channel.{ChannelDuplexHandler, ChannelHandlerContext, ChannelPromise}
-import io.netty.handler.codec.http.{
-  DefaultFullHttpResponse,
-  FullHttpResponse,
-  HttpObject,
-  HttpResponseStatus,
-  HttpVersion
-}
-import io.netty.handler.codec.http2.{Http2Error, Http2ResetFrame, Http2WindowUpdateFrame}
+import io.netty.channel.ChannelDuplexHandler
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelPromise
+import io.netty.handler.codec.http.DefaultFullHttpResponse
+import io.netty.handler.codec.http.FullHttpResponse
+import io.netty.handler.codec.http.HttpObject
+import io.netty.handler.codec.http.HttpResponseStatus
+import io.netty.handler.codec.http.HttpVersion
+import io.netty.handler.codec.http2.Http2Error
+import io.netty.handler.codec.http2.Http2ResetFrame
+import io.netty.handler.codec.http2.Http2WindowUpdateFrame
 import io.netty.util.ReferenceCountUtil
 import scala.util.control.NoStackTrace
 
@@ -153,7 +157,7 @@ private[http2] object Http2StreamMessageHandler {
 
 class ClientDiscardedRequestException private[transport] (
   errorCode: Long,
-  val flags: Long = FailureFlags.NonRetryable)
+  val flags: Long = FailureFlags.NonRetryable | FailureFlags.ClientDiscarded)
     extends Exception(
       s"Attempted to write to a stream after receiving an RST with error code $errorCode"
     )

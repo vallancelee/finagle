@@ -17,7 +17,7 @@ class ClientDiscardedRequestException private[mux] (why: String, val flags: Long
     with NoStackTrace {
   def logLevel: com.twitter.logging.Level = com.twitter.logging.Level.DEBUG
 
-  def this(why: String) = this(why, FailureFlags.Interrupted)
+  def this(why: String) = this(why, FailureFlags.Interrupted | FailureFlags.ClientDiscarded)
 
   def copyWithFlags(newFlags: Long): ClientDiscardedRequestException =
     new ClientDiscardedRequestException(why, newFlags)

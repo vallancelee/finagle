@@ -288,6 +288,10 @@ class FailureAccrualFactory[Req, Rep](
   private[this] val revivalCounter = statsReceiver.counter("revivals")
   private[this] val probesCounter = statsReceiver.counter("probes")
   private[this] val removedForCounter = statsReceiver.counter("removed_for_ms")
+  private[this] val serviceAcquisitionFailuresScope =
+    statsReceiver.scope("failures", "service_acquisition")
+  private[this] val serviceApplicationFailuresScope =
+    statsReceiver.scope("failures", "service_application")
 
   private[this] def didFail(): Unit = self.synchronized {
     state match {
@@ -306,11 +310,6 @@ class FailureAccrualFactory[Req, Rep](
     }
   }
 
-  private[this] def onServiceAcquisitionFailure(): Unit = self.synchronized {
-    stopProbing()
-    didFail()
-  }
-
   protected def didSucceed(): Unit = self.synchronized {
     // Only count revivals when the probe succeeds.
     state match {
@@ -325,10 +324,11 @@ class FailureAccrualFactory[Req, Rep](
 
   private[this] def didReceiveIgnorable(): Unit = self.synchronized {
     state match {
-      // If we receive a `FailureFlags.Ignorable` in the `ProbeClosed` state, we must transition back
-      // to `ProbeOpen`, since no other state transition will be triggered via `didSucceed` or
-      // `didFail`, and we don't want to be stuck in `ProbeClosed`; the status is `Busy` in that
-      // state and we do not receive further requests.
+      // If we receive a `FailureFlags.Ignorable` or `FailureFlags.ClientDiscarded` in the
+      // `ProbeClosed` state,  we must transition back to `ProbeOpen`, since no other state
+      // transition will be triggered via `didSucceed` or `didFail`, and we don't want to be stuck
+      // in `ProbeClosed`; the status is `Busy` in that state and we do not receive further
+      // requests.
       case ProbeClosed =>
         state = ProbeOpen
       case _ =>
@@ -397,15 +397,25 @@ class FailureAccrualFactory[Req, Rep](
         stopProbing()
 
         service(request).respond { rep =>
-          classify(ReqRep(request, rep)) match {
-            case ResponseClass.Successful(_) =>
-              didSucceed()
-
-            case ResponseClass.Failed(_) =>
-              didFail()
-
-            case ResponseClass.Ignorable =>
+          rep match {
+            case Throw(f: FailureFlags[_]) if f.isFlagged(FailureFlags.ClientDiscarded) =>
               didReceiveIgnorable()
+            case _ =>
+              classify(ReqRep(request, rep)) match {
+                case ResponseClass.Successful(_) =>
+                  didSucceed()
+
+                case ResponseClass.Failed(_) =>
+                  rep match {
+                    case Throw(e) =>
+                      serviceApplicationFailuresScope.counter(e.getClass.getName).incr()
+                    case Return(_) =>
+                      serviceApplicationFailuresScope.counter("encoded_application_error").incr()
+                  }
+                  didFail()
+                case ResponseClass.Ignorable =>
+                  didReceiveIgnorable()
+              }
           }
         }
       }
@@ -417,15 +427,20 @@ class FailureAccrualFactory[Req, Rep](
     }
   }
 
-  private[this] val applyService: Try[Service[Req, Rep]] => Future[Service[Req, Rep]] = {
+  private[this] val acquireService: Try[Service[Req, Rep]] => Future[Service[Req, Rep]] = {
     case Return(svc) => Future.value(makeService(svc))
-    case t @ Throw(_) =>
-      onServiceAcquisitionFailure()
+    case t @ Throw(f: FailureFlags[_]) if f.isFlagged(FailureFlags.ClientDiscarded) =>
+      didReceiveIgnorable()
+      Future.const(t.cast[Service[Req, Rep]])
+    case t @ Throw(e) =>
+      stopProbing()
+      didFail()
+      serviceAcquisitionFailuresScope.counter(e.getClass.getName).incr()
       Future.const(t.cast[Service[Req, Rep]])
   }
 
   def apply(conn: ClientConnection): Future[Service[Req, Rep]] =
-    underlying(conn).transform(applyService)
+    underlying(conn).transform(acquireService)
 
   override def status: Status = state match {
     case Alive | ProbeOpen => underlying.status

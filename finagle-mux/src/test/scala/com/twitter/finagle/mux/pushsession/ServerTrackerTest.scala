@@ -166,7 +166,8 @@ class ServerTrackerTest extends AnyFunSuite {
         throw p.isInterrupted.get
       }
 
-      assert(ex.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable))
+      assert(
+        ex.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable | FailureFlags.ClientDiscarded))
       assert(tracker.lessee.npending == 0)
 
       val Rdiscarded(2) = messageWriter.messages.dequeue()

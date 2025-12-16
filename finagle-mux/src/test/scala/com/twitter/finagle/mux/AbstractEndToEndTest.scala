@@ -553,7 +553,8 @@ abstract class AbstractEndToEndTest
     }
 
     assert(e.getMessage.contains(BackupRequestFilter.SupersededRequestFailureWhy))
-    assert(e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable))
+    assert(
+      e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable | FailureFlags.ClientDiscarded))
 
     await(client.close(), 5.seconds)
     await(server.close(), 5.seconds)
@@ -580,7 +581,8 @@ abstract class AbstractEndToEndTest
     }
 
     assert(e.getMessage.contains(BackupRequestFilter.SupersededRequestFailureWhy))
-    assert(e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable))
+    assert(
+      e.flags == (FailureFlags.Interrupted | FailureFlags.Ignorable | FailureFlags.ClientDiscarded))
 
     await(client.close(), 5.seconds)
     await(proxy2Server.close(), 5.seconds)

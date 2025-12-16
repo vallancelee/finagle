@@ -268,7 +268,9 @@ private object ServerTracker {
   private val log = Logger.get()
 
   private def newSupersededBackupRequestException(why: String): Exception =
-    new ClientDiscardedRequestException(why, FailureFlags.Interrupted | FailureFlags.Ignorable)
+    new ClientDiscardedRequestException(
+      why,
+      FailureFlags.Interrupted | FailureFlags.Ignorable | FailureFlags.ClientDiscarded)
 
   // cases included:
   // 1. the SupersededRequestFailure thrown by BackRequestFilter,
